@@ -61,6 +61,7 @@ FlappyBird.exe                 :: ventana de 1280x860
 FlappyBird.exe 800x480         :: cualquier tamaño
 FlappyBird.exe --fullscreen    :: pantalla completa (ESC en el menú sale)
 FlappyBird.exe --help
+FlappyBird.exe --debug         :: FPS, dt y cajas de colision en pantalla
 ```
 
 ## Ejecutar en Linux y Raspberry Pi
@@ -78,6 +79,29 @@ compila SQLite; luego se reutiliza el `.o`.
 **En Raspberry Pi hay que compilar en el propio Pi**: un binario x86_64 no se
 ejecuta en ARM. Copia el proyecto y lanza `./build.sh` allí, desde `FlappyBird/FlappyBird-Linux/`. Para arranque en
 modo kiosco, `--fullscreen`.
+
+### Rendimiento en Raspberry Pi
+
+La Pi 3 va justa a 1280x860: son 1.1 Mpx dibujados varias veces por fotograma y
+la VideoCore IV se queda sin relleno. **Baja la resolución**, que es lo que más
+se nota:
+
+```bash
+./FlappyBird 800x480     # 3 veces menos pixeles que por defecto
+./FlappyBird 640x480
+```
+
+Para medir en vez de suponer, `--debug` muestra FPS reales, el `dt` máximo y las
+cajas de colisión:
+
+```bash
+./FlappyBird 800x480 --debug
+```
+
+Si **`dt max` se queda pegado a 50 ms**, la máquina no llega a 20 FPS: el paso de
+tiempo toca su tope y el juego pasa a cámara lenta, con saltos grandes entre
+fotogramas que hacen que las colisiones *parezcan* injustas aunque sean
+correctas. Es la señal de que hay que bajar resolución.
 
 Si quieres jugar con mando, hace falta el módulo `joydev` y estar en el grupo
 `input` (ambos vienen de serie en Raspberry Pi OS). Comprobación rápida:

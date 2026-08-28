@@ -303,6 +303,7 @@ struct WindowConfig
 	unsigned height = DesignH;
 	bool fullscreen = false;
 	bool helpRequested = false;
+	bool debug = false;      // FPS + cajas de colision en pantalla
 };
 
 void printUsage(const char* exe)
@@ -324,6 +325,11 @@ bool parseArgs(int argc, char** argv, WindowConfig& cfg)
 		if (a == "-f" || a == "--fullscreen")
 		{
 			cfg.fullscreen = true;
+			continue;
+		}
+		if (a == "-d" || a == "--debug")
+		{
+			cfg.debug = true;
 			continue;
 		}
 		if (a == "-h" || a == "--help")
@@ -681,6 +687,11 @@ int main(int argc, char** argv)
 	deque <RectangleShape> topPipe, bottomPipe;
 	int pipeIndex = 0;
 	int sizeOf_PipesDeque = 0;
+	// Primera lanza que todavia importa. Las anteriores ya salieron por la
+	// izquierda y no hace falta ni moverlas ni dibujarlas. Sin esto se
+	// recorrian las 100 en cada fotograma: 200 draw calls, casi todos fuera
+	// de pantalla, que es lo que ahogaba a la Raspberry Pi.
+	int firstActivePipe = 0;
 
 	const int topPipe_minYpos = 120, topPipe_maxYpos = 380; // Top Pipe minimum & bestScoremum positions on Y-axis 
 	float topPipeYpos, bottomPipeYpos; // To save top & bottom pipe's positions 
@@ -831,6 +842,16 @@ int main(int argc, char** argv)
 	bool padActive = false;  // el resaltado solo se ve si se navega sin raton
 	bool pointerPrev = false;   // para detectar el flanco de pulsacion
 
+	// --- diagnostico (--debug) ---
+	Text dbgText("", gameFont, 26);
+	dbgText.setFillColor(Color(0, 255, 120));
+	dbgText.setOutlineThickness(2.f);
+	dbgText.setOutlineColor(Color::Black);
+	RectangleShape dbgBox;
+	dbgBox.setFillColor(Color::Transparent);
+	dbgBox.setOutlineThickness(2.f);
+	float fpsAcc = 0.f; int fpsFrames = 0; float fpsShown = 0.f; float dtWorst = 0.f;
+
 	// --- Pantalla de nombre (entre "Play" y "Get Ready") ---
 	bool isNameEntry = false;
 	string playerName(NameLen, ' ');
@@ -907,6 +928,23 @@ int main(int argc, char** argv)
 		float dt = frameClock.restart().asSeconds();
 		if (dt > MaxFrameTime)
 			dt = MaxFrameTime;
+
+		if (cfg.debug)
+		{
+			// dt ya viene acotado, asi que "dt max" tocando MaxFrameTime (50 ms)
+			// significa que la maquina no llega a 20 FPS y el juego va a camara
+			// lenta: es la senal de que hay que bajar la resolucion.
+			fpsAcc += dt;
+			++fpsFrames;
+			if (dt > dtWorst)
+				dtWorst = dt;
+			if (fpsAcc >= 0.5f)
+			{
+				fpsShown = fpsFrames / fpsAcc;
+				fpsAcc = 0.f;
+				fpsFrames = 0;
+			}
+		}
 
 		// Un unico impulso por pulsacion. Se detecta por EVENTO, nunca con
 		// isKeyPressed: consultar el estado daria un impulso en cada fotograma
@@ -1180,6 +1218,12 @@ int main(int argc, char** argv)
 						top_pipe.setPosition(ViewRight + 30, topPipeYpos); // Sets the Top Pipe position
 						bottom_pipe.setPosition(ViewRight + 30, bottomPipeYpos); // Sets the Bottom Pipe position
 
+						// La textura se asigna aqui y no al dibujar: 'day' solo
+						// cambia al reiniciar, asi que repetirlo cada fotograma
+						// para cada lanza era trabajo tirado.
+						top_pipe.setTexture(day ? &gPipe[0] : &rPipe[0]);
+						bottom_pipe.setTexture(day ? &gPipe[1] : &rPipe[1]);
+
 						topPipe.push_back(RectangleShape(top_pipe)); // Add a pipe to the top_deque
 						bottomPipe.push_back(RectangleShape(bottom_pipe)); // Add a pipe to the bottom_deque
 						sizeOf_PipesDeque++;
@@ -1187,8 +1231,13 @@ int main(int argc, char** argv)
 						pipeSpawnTimer = 0.f;
 					}
 				}
-				// Moving Pipes
-				for (int i = 0; i < sizeOf_PipesDeque; i++)
+				// Se descartan las que ya salieron por la izquierda.
+				while (firstActivePipe < sizeOf_PipesDeque
+					&& topPipe[firstActivePipe].getPosition().x + PipeDrawW < ViewLeft)
+					++firstActivePipe;
+
+				// Moving Pipes (solo las que siguen en juego)
+				for (int i = firstActivePipe; i < sizeOf_PipesDeque; i++)
 				{
 					topPipe[i].move(baseVelocity * dt); // Moves the TOP pipe to the left
 					bottomPipe[i].move(baseVelocity * dt);	// Moves the BOTTOM pipe to the left
@@ -1529,6 +1578,7 @@ int main(int argc, char** argv)
 					// Reset Pipes
 					sizeOf_PipesDeque = 0;
 					pipeIndex = 0;
+					firstActivePipe = 0;
 					pipeSpawnTimer = 0;
 					numOfPipesCounter = 0;
 					topPipe.clear();
@@ -1597,6 +1647,7 @@ int main(int argc, char** argv)
 					// Reset Pipes
 					sizeOf_PipesDeque = 0;
 					pipeIndex = 0;
+					firstActivePipe = 0;
 					pipeSpawnTimer = 0;
 					numOfPipesCounter = 0;
 					topPipe.clear();
@@ -1686,18 +1737,12 @@ int main(int argc, char** argv)
 			window.draw(bgi[1]);
 
 		//Pipes
-		for (int i = 0; i < sizeOf_PipesDeque; i++)
+		for (int i = firstActivePipe; i < sizeOf_PipesDeque; i++)
 		{
-			if (day)
-			{
-				topPipe[i].setTexture(&gPipe[0]);
-				bottomPipe[i].setTexture(&gPipe[1]);
-			}
-			else
-			{
-				topPipe[i].setTexture(&rPipe[0]);
-				bottomPipe[i].setTexture(&rPipe[1]);
-			}
+			// Las de la derecha aun no han entrado: en cuanto se llega a una
+			// fuera de pantalla, las siguientes tambien lo estan.
+			if (topPipe[i].getPosition().x > ViewRight)
+				break;
 			window.draw(topPipe[i]);
 			window.draw(bottomPipe[i]);
 		}
@@ -1945,6 +1990,40 @@ int main(int argc, char** argv)
 #pragma endregion
 
 		/*     END-DRAWING     */
+
+		if (cfg.debug)
+		{
+			// Cajas de colision REALES, las mismas que usa el juego.
+			auto marco = [&](const FloatRect& r, Color c) {
+				dbgBox.setOutlineColor(c);
+				dbgBox.setPosition(r.left, r.top);
+				dbgBox.setSize(Vector2f(r.width, r.height));
+				window.draw(dbgBox);
+			};
+			if (isGetReady_Pressed)
+			{
+				marco(goatHitbox(bird), Color(0, 255, 120));
+				for (int i = firstActivePipe; i < sizeOf_PipesDeque; i++)
+				{
+					if (topPipe[i].getPosition().x > ViewRight) break;
+					Color c = (i == pipeIndex) ? Color(255, 60, 60) : Color(255, 200, 0);
+					marco(pipeHitbox(topPipe[i]), c);
+					marco(pipeHitbox(bottomPipe[i]), c);
+				}
+			}
+
+			ostringstream d;
+			d << "FPS " << (int)(fpsShown + 0.5f)
+			  << "   dt max " << (int)(dtWorst * 1000.f) << " ms"
+			  << "   lanzas dibujadas " << (sizeOf_PipesDeque - firstActivePipe)
+			  << " de " << sizeOf_PipesDeque
+			  << "\n"
+			  << "ventana " << window.getSize().x << "x" << window.getSize().y
+			  << "   vista " << (int)viewW() << "x" << (int)viewH();
+			dbgText.setString(d.str());
+			dbgText.setPosition(ViewLeft + 12.f, 12.f);
+			window.draw(dbgText);
+		}
 
 		window.display();
 
