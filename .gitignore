@@ -1,0 +1,31 @@
+# Base de datos de puntuaciones: es datos del jugador, no del proyecto
+scores.db
+scores.db-journal
+
+# Artefactos de compilacion
+FlappyBird/FlappyBird-Linux/FlappyBird
+FlappyBird/FlappyBird-Linux/sqlite3.o
+FlappyBird/FlappyBird-Win/FlappyBird.exe
+FlappyBird/FlappyBird-Win/build/
+*.obj
+*.o
+*.pdb
+*.ilk
+
+# SDK de SFML descargado por conveniencia (no es fuente del proyecto)
+SFML-2.6.2/
+
+# Android
+FlappyBird/FlappyBird-Android/app/build/
+FlappyBird/FlappyBird-Android/build/
+FlappyBird/FlappyBird-Android/.gradle/
+FlappyBird/FlappyBird-Android/local.properties
+FlappyBird/FlappyBird-Android/app/src/main/obj/
+FlappyBird/FlappyBird-Android/app/src/main/libs/
+
+# SFML compilado para Android
+SFML-2.6.2/bld-arm64/
+
+# Python
+__pycache__/
+*.pyc

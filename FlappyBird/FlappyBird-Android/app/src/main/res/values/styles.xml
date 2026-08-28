@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Pantalla completa sin barras. La variante v27 anade el permiso para
+         dibujar bajo el notch de la camara; sin eso Android deja una banda
+         negra en ese lado. -->
+    <style name="GameTheme" parent="@android:style/Theme.NoTitleBar.Fullscreen" />
+</resources>

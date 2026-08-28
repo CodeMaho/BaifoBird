@@ -1,0 +1,21 @@
+# Los scripts de shell y los makefiles del NDK DEBEN quedarse con finales LF.
+# Con CRLF, Linux falla con "bash\r: No such file or directory" y ndk-build no
+# interpreta bien el Android.mk.
+*.sh        text eol=lf
+*.mk        text eol=lf
+gradlew     text eol=lf
+
+# Los de Windows, al reves
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# Binarios: que git no los toque
+*.png       binary
+*.jpg       binary
+*.ttf       binary
+*.TTF       binary
+*.wav       binary
+*.ogg       binary
+*.apk       binary
+*.dll       binary
+*.ico       binary
