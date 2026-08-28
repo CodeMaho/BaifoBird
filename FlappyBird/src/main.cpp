@@ -93,7 +93,6 @@ float viewH() { return ViewBottom - ViewTop; }
 const float GoatDrawW = 74.f, GoatDrawH = 76.f;
 const float GoatHitScaleX = 0.70f, GoatHitScaleY = 0.66f;
 const float PipeDrawW = 130.f;
-const float PipeHitInset = 11.f;  // el asta ocupa 107 de los 130 px del rectangulo
 
 
 void get_BirdColor(char& colorChar); //Random Generator (Bird color)
@@ -114,14 +113,64 @@ FloatRect goatHitbox(const RectangleShape& goat)
 	return FloatRect(cx - w / 2.f, cy - h / 2.f, w, h);
 }
 
-// Caja de colision de la lanza: el asta es mas estrecha que el rectangulo de
-// dibujo, asi que sin esto se muere "contra el aire" a ambos lados.
-FloatRect pipeHitbox(const RectangleShape& pipe)
+// SILUETA DE LA LANZA, medida sobre el asset (130x860): distancia desde la
+// PUNTA, en fraccion de la altura, y semiancho en px a esa altura.
+//
+// Un unico rectangulo no vale: el arma se afila desde el 88% de su largo hasta
+// acabar en pico, y una caja recta cubria ahi hasta 52 px de mas por lado,
+// justo en la zona del hueco. Es lo que hacia morir "contra el aire".
+struct PipeBand { float desdePunta; float semiancho; };
+const PipeBand PipeProfile[] = {
+	{ 0.00f,  2.f },   // el pico
+	{ 0.02f, 11.f },
+	{ 0.05f, 21.f },
+	{ 0.08f, 30.f },
+	{ 0.10f, 40.f },
+	{ 0.12f, 50.f },
+	{ 0.15f, 59.f },
+	{ 0.20f, 60.f },   // el reborde metalico, la parte mas ancha
+	{ 0.25f, 56.f },
+	{ 1.00f, 52.f },   // el asta
+};
+const int PipeBands = (int)(sizeof(PipeProfile) / sizeof(PipeProfile[0]));
+
+// Rectangulo de una banda. Se toma el semiancho MENOR de los dos extremos para
+// que la caja nunca sobresalga del dibujo: si hay error, que sea a favor del
+// jugador.
+FloatRect pipeBandRect(const RectangleShape& pipe, bool puntaAbajo, int i)
 {
 	FloatRect b = pipe.getGlobalBounds();
-	b.left += PipeHitInset;
-	b.width -= 2.f * PipeHitInset;
-	return b;
+	float cx = b.left + b.width / 2.f;
+
+	float f0 = PipeProfile[i].desdePunta;
+	float f1 = (i + 1 < PipeBands) ? PipeProfile[i + 1].desdePunta : 1.f;
+	float hw = PipeProfile[i].semiancho;
+	if (i + 1 < PipeBands)
+		hw = min(hw, PipeProfile[i + 1].semiancho);
+
+	float y0, y1;
+	if (puntaAbajo)   // lanza de arriba: el pico mira hacia el hueco, abajo
+	{
+		y0 = b.top + b.height * (1.f - f1);
+		y1 = b.top + b.height * (1.f - f0);
+	}
+	else              // lanza de abajo: el pico esta arriba
+	{
+		y0 = b.top + b.height * f0;
+		y1 = b.top + b.height * f1;
+	}
+	return FloatRect(cx - hw, y0, 2.f * hw, y1 - y0);
+}
+
+bool pipeHits(const FloatRect& caja, const RectangleShape& pipe, bool puntaAbajo)
+{
+	// Descarte rapido por el rectangulo completo antes de mirar banda a banda.
+	if (!caja.intersects(pipe.getGlobalBounds()))
+		return false;
+	for (int i = 0; i < PipeBands; ++i)
+		if (caja.intersects(pipeBandRect(pipe, puntaAbajo, i)))
+			return true;
+	return false;
 }
 
 // Ancla el texto en su centro, para poder situarlo por el punto medio de la
@@ -1281,13 +1330,13 @@ int main(int argc, char** argv)
 				if (sizeOf_PipesDeque > 0 && scoreCounter != numOfPipes)
 				{
 					//---TOP Pipe Collision---
-					if (goatHitbox(bird).intersects(pipeHitbox(topPipe[pipeIndex])))
+					if (pipeHits(goatHitbox(bird), topPipe[pipeIndex], true))
 					{
 						hit_sound.play();
 						isCollided = true;
 					}
 					//---BOTTOM Pipe Collision---
-					else if (goatHitbox(bird).intersects(pipeHitbox(bottomPipe[pipeIndex])))
+					else if (pipeHits(goatHitbox(bird), bottomPipe[pipeIndex], false))
 					{
 						hit_sound.play();
 						isCollided = true;
@@ -2038,8 +2087,11 @@ int main(int argc, char** argv)
 				{
 					if (topPipe[i].getPosition().x > ViewRight) break;
 					Color c = (i == pipeIndex) ? Color(255, 60, 60) : Color(255, 200, 0);
-					marco(pipeHitbox(topPipe[i]), c);
-					marco(pipeHitbox(bottomPipe[i]), c);
+					for (int b = 0; b < PipeBands; ++b)
+					{
+						marco(pipeBandRect(topPipe[i], true, b), c);
+						marco(pipeBandRect(bottomPipe[i], false, b), c);
+					}
 				}
 			}
 

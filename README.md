@@ -216,6 +216,18 @@ escritorio, una pantalla pequeña de Pi y un móvil 21:9.
 Los tests de posición usan `mapPixelToCoords()`, que aplica esa misma View, así
 que ratón y dedo aciertan a cualquier escala sin código aparte.
 
+### La colisión sigue la forma de la lanza
+
+El arma no es un rectángulo: se afila desde el 88 % de su largo hasta acabar en
+pico. Una caja recta cubría ahí **hasta 52 px de más por lado**, justo en la
+zona del hueco, y se moría «contra el aire».
+
+La colisión usa un perfil de 10 bandas medido sobre el propio asset, que baja
+de 52 px de semiancho en el asta a 2 px en el pico, pasando por los 60 px del
+reborde metálico. Cada banda toma el semiancho **menor** de sus dos extremos,
+así que la caja nunca sobresale del dibujo: si hay error, es a favor del
+jugador. Se puede ver con `--debug`.
+
 ### Puntuaciones en SQLite
 
 En `scores.db`, junto al ejecutable (en Android, en el almacenamiento interno de
