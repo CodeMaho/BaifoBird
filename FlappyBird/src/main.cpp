@@ -597,6 +597,8 @@ int main(int argc, char** argv)
 	Texture credit_names_BG;
 	if (!credit_names_BG.loadFromFile("assets/Credit Back ground.jpg"))  // with the bird 
 		return EXIT_FAILURE;
+	credit_names_BG.setSmooth(true);
+	credit_names_BG.generateMipmap();
 	Sprite credit_names_BGSprite(credit_names_BG);
 
 	// Names
@@ -651,6 +653,19 @@ int main(int argc, char** argv)
 		|| !BGImages.bkImage[2].loadFromFile("assets/background-day-blur.png")
 		)
 		return EXIT_FAILURE;
+
+	// Los fondos SIEMPRE salen escalados (coverView los ajusta a la vista) y en
+	// una Pi se reducen de 1280x860 a la ventana real. Con filtrado nearest eso
+	// obliga a leer texels de toda la textura y machaca la cache; con mipmaps
+	// la GPU lee de un nivel ya reducido: menos ancho de banda y ademas se
+	// quita el parpadeo del escalado.
+	// Solo se aplica a los fondos: la cabra, las lanzas y el suelo se dejan sin
+	// suavizar para que el pixel art siga nitido.
+	for (int i = 0; i < 3; ++i)
+	{
+		BGImages.bkImage[i].setSmooth(true);
+		BGImages.bkImage[i].generateMipmap();
+	}
 
 	Sprite bgi[3];
 	bgi[0].setTexture(BGImages.bkImage[0]);
@@ -791,6 +806,7 @@ int main(int argc, char** argv)
 #pragma region Show score during the game
 
 	int scoreCounter = 0;
+	int scoreMostrado = -1;   // ultimo valor volcado a labelScore
 	ostringstream ssScore;
 	ssScore << scoreCounter;
 	Text labelScore;
@@ -1802,19 +1818,28 @@ int main(int argc, char** argv)
 		window.clear();
 		/*     DRAWING     */
 
-		// Los fondos cubren toda la zona visible (ver coverView). Se recalcula
-		// cada fotograma porque es barato y asi sobrevive a un cambio de vista.
-		for (int i = 0; i < 3; ++i)
-			coverView(bgi[i]);
-		coverView(credit_names_BGSprite);
+		// Solo se recoloca el fondo que se va a dibujar, no los cuatro.
+		coverView(bgi[day ? 0 : 1]);
+		if (!isPlayButton_Pressed)
+			coverView(bgi[2]);
+		if (isCredits_Pressed || isHighScore_Pressed || isNameEntry)
+			coverView(credit_names_BGSprite);
 
 #pragma region Draiwing
 
 		//Background Image
+		// Los fondos y el suelo son 100% opacos (alpha 255 en todo el asset),
+		// asi que se dibujan con BlendNone: la GPU se ahorra leer el destino y
+		// mezclar en cada pixel. En la VideoCore IV, que es de tiles y va justa
+		// de ancho de banda, es de lo que mas se nota.
+		//
+		// NO se quita el window.clear(): en un renderizador por tiles el clear
+		// le indica al driver que no cargue el contenido anterior del
+		// framebuffer, asi que quitarlo seria contraproducente.
 		if (day)
-			window.draw(bgi[0]);
+			window.draw(bgi[0], RenderStates(BlendNone));
 		else
-			window.draw(bgi[1]);
+			window.draw(bgi[1], RenderStates(BlendNone));
 
 		//Pipes
 		for (int i = firstActivePipe; i < sizeOf_PipesDeque; i++)
@@ -1827,8 +1852,8 @@ int main(int argc, char** argv)
 			window.draw(bottomPipe[i]);
 		}
 
-		//Base
-		window.draw(base);
+		//Base (opaco: sin mezcla)
+		window.draw(base, RenderStates(BlendNone));
 
 		//Bird
 		window.draw(bird);
@@ -1846,9 +1871,13 @@ int main(int argc, char** argv)
 		//Current score
 		if (isGetReady_Pressed && !isGameOver && !isWon)
 		{
-			ssScore.str(""); // Updates the Score Value
-			ssScore << scoreCounter; // Sets the new Value 
-			labelScore.setString(ssScore.str()); // Sets the value to a string 
+			// setString reconstruye la geometria del texto, asi que solo se
+			// llama cuando la puntuacion cambia de verdad.
+			if (scoreCounter != scoreMostrado)
+			{
+				scoreMostrado = scoreCounter;
+				labelScore.setString(to_string(scoreCounter));
+			}
 			window.draw(labelScore);
 		}
 
@@ -1908,7 +1937,7 @@ int main(int argc, char** argv)
 
 		//Blur Background Image
 		if (!isPlayButton_Pressed)
-			window.draw(bgi[2]);
+			window.draw(bgi[2], RenderStates(BlendNone));
 
 		//Main Menu Texts
 		if (!isPlayButton_Pressed)
@@ -1937,7 +1966,7 @@ int main(int argc, char** argv)
 		//Credits Button
 		if (isCredits_Pressed)
 		{
-			window.draw(credit_names_BGSprite);
+			window.draw(credit_names_BGSprite, RenderStates(BlendNone));
 			window.draw(credit_names);
 			window.draw(madyBy);
 			window.draw(return_to_mainMenu);
@@ -1948,7 +1977,7 @@ int main(int argc, char** argv)
 		//HighScore Button -> tabla de records
 		if (isHighScore_Pressed)
 		{
-			window.draw(credit_names_BGSprite);
+			window.draw(credit_names_BGSprite, RenderStates(BlendNone));
 
 			if (hsDirty)
 			{
@@ -2026,7 +2055,7 @@ int main(int argc, char** argv)
 		//Nombre del jugador
 		if (isNameEntry)
 		{
-			window.draw(credit_names_BGSprite);
+			window.draw(credit_names_BGSprite, RenderStates(BlendNone));
 
 			nameTitle.setPosition(DesignW / 2.f - nameTitle.getGlobalBounds().width / 2.f, 180);
 			window.draw(nameTitle);

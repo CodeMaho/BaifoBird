@@ -148,6 +148,33 @@ y `--revert` los restaura. Se niega a ejecutarse si no detecta una Raspberry Pi.
 En modo kiosco: **ESC** en el menú principal cierra el juego, y **Ctrl+Alt+F2**
 te lleva a una consola.
 
+### Qué se optimizó y por qué
+
+En la Pi el coste que manda es el **relleno** (píxeles escritos), no el número
+de llamadas de dibujo: durante la partida son solo ~10.
+
+| Cambio | Efecto |
+|---|---|
+| Solo se mueven y dibujan las lanzas visibles | de ~200 llamadas de dibujo a 4–6 |
+| Textura de la lanza asignada al desovar | 200 `setTexture` por fotograma menos |
+| Fondos y suelo con `BlendNone` | son 100 % opacos: la GPU se ahorra leer el destino y mezclar |
+| Mipmaps en los fondos | siempre salen escalados; leer de un nivel reducido gasta menos ancho de banda y quita el parpadeo |
+| El marcador solo se regenera al cambiar | `setString` reconstruye la geometría del texto |
+| Resolución por defecto de 800x538 en Pi | 39 % de los píxeles |
+
+**No** se quitó `window.clear()`, aunque el fondo ya cubre toda la pantalla: la
+VideoCore IV es un renderizador **por tiles**, y ahí el `clear` le dice al driver
+que no cargue el contenido anterior del framebuffer. Quitarlo sería
+contraproducente.
+
+Los mipmaps se aplican **solo a los fondos**: la cabra, las lanzas y el suelo se
+dejan sin suavizar para que el pixel art siga nítido.
+
+Si aún hace falta más, el siguiente paso serio es
+[**sfml-pi**](https://github.com/mickelson/sfml-pi), un fork de SFML que corre
+**sin X11** usando dispmanx en Pi 0–3. Quitar el servidor gráfico de la ecuación
+es la mayor ganancia estructural que queda, pero implica compilar otro SFML.
+
 Si quieres jugar con mando, hace falta el módulo `joydev` y estar en el grupo
 `input` (ambos vienen de serie en Raspberry Pi OS). Comprobación rápida:
 `ls /dev/input/js*` debe listar algo con el mando encendido.
