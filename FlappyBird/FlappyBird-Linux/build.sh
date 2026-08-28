@@ -24,7 +24,19 @@ if ! command -v g++ >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! echo '#include <SFML/Graphics.hpp>' | g++ -E -x c++ - -o /dev/null 2>/dev/null; then
+# Si esta SFML-Pi instalado (el fork que dibuja sin X11), se usa ese. Ver
+# install-sfml-pi.sh. Si no, el SFML del sistema.
+SFML_PI=/opt/sfml-pi
+SFML_INC=""
+SFML_LIB=""
+SFML_RPATH=""
+if [ -d "$SFML_PI/include/SFML" ]; then
+    SFML_INC="-I $SFML_PI/include"
+    SFML_LIB="-L $SFML_PI/lib"
+    # rpath para que el binario encuentre estas librerias sin LD_LIBRARY_PATH
+    SFML_RPATH="-Wl,-rpath,$SFML_PI/lib"
+    echo "usando SFML-Pi de $SFML_PI (sin X11)"
+elif ! echo '#include <SFML/Graphics.hpp>' | g++ -E -x c++ - -o /dev/null 2>/dev/null; then
     echo "Faltan las cabeceras de SFML.  sudo apt install libsfml-dev" >&2
     exit 1
 fi

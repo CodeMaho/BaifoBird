@@ -207,8 +207,15 @@ if [ $KIOSCO -eq 1 ]; then
     # archivos...), arrancando X con el juego como unico cliente. En una Pi 3
     # eso libera bastante CPU y memoria.
 
-    if ! command -v xinit >/dev/null 2>&1; then
+    # Con SFML-Pi no hace falta servidor grafico: el juego pinta directo por
+    # DRM/KMS desde la consola. Es el mejor caso posible en una Pi 3.
+    SIN_X=0
+    if [ -d /opt/sfml-pi/include/SFML ] && ldd "$JUEGO_DIR/FlappyBird" 2>/dev/null | grep -q "/opt/sfml-pi/"; then
+        SIN_X=1
+        info "SFML-Pi detectado: kiosco SIN servidor grafico"
+    elif ! command -v xinit >/dev/null 2>&1; then
         rojo "Falta xinit:  sudo apt install --no-install-recommends xserver-xorg xinit"
+        info "o instala SFML-Pi para prescindir de X:  ./install-sfml-pi.sh"
         exit 1
     fi
 
@@ -232,8 +239,27 @@ AEOF
     fi
     info "autologin de $USUARIO en tty1"
 
+    # --- kiosco sin X (SFML-Pi): el juego se lanza directo en la consola ---
+    if [ $SIN_X -eq 1 ] && [ $SIMULAR -eq 0 ]; then
+        PERFIL="$CASA/.bash_profile"
+        respaldar "$PERFIL"
+        touch "$PERFIL"
+        if ! grep -q "BaifoBird kiosco" "$PERFIL"; then
+            cat >> "$PERFIL" <<PEOF
+
+# BaifoBird kiosco (SFML-Pi, sin servidor grafico)
+if [ "\$XDG_VTNR" = 1 ]; then
+    cd "$JUEGO_DIR" || exit 1
+    SFML_DRM_MODE=$MODO_KIOSCO exec ./FlappyBird
+fi
+PEOF
+        fi
+        chown "$USUARIO":"$USUARIO" "$PERFIL"
+        info "el juego arranca directo en tty1, sin X, a $MODO_KIOSCO"
+    fi
+
     # sesion X con el juego como unico cliente
-    if [ $SIMULAR -eq 0 ]; then
+    if [ $SIN_X -eq 0 ] && [ $SIMULAR -eq 0 ]; then
         cat > "$CASA/.xinitrc" <<XEOF
 #!/bin/sh
 [ -f "\$HOME/.xinitrc.baifobird-common" ] && . "\$HOME/.xinitrc.baifobird-common"
@@ -270,7 +296,7 @@ PEOF
         fi
         chown "$USUARIO":"$USUARIO" "$PERFIL"
     fi
-    info "sesion X que ejecuta solo ./FlappyBird --fullscreen"
+    [ $SIN_X -eq 0 ] && info "sesion X que ejecuta solo ./FlappyBird --fullscreen"
     info "para salir del juego: ESC en el menu principal"
     info "para recuperar una consola: Ctrl+Alt+F2"
 fi

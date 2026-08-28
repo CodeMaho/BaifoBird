@@ -170,10 +170,43 @@ contraproducente.
 Los mipmaps se aplican **solo a los fondos**: la cabra, las lanzas y el suelo se
 dejan sin suavizar para que el pixel art siga nítido.
 
-Si aún hace falta más, el siguiente paso serio es
-[**sfml-pi**](https://github.com/mickelson/sfml-pi), un fork de SFML que corre
-**sin X11** usando dispmanx en Pi 0–3. Quitar el servidor gráfico de la ecuación
-es la mayor ganancia estructural que queda, pero implica compilar otro SFML.
+### Sin servidor gráfico: SFML-Pi
+
+Si aún hace falta más, queda la mayor ganancia estructural: quitar X11 de la
+ecuación. [**SFML-Pi**](https://github.com/mickelson/sfml-pi) es un fork de SFML
+que dibuja directamente por **DRM/KMS**, sin servidor gráfico.
+
+```bash
+cd FlappyBird/FlappyBird-Linux
+./install-sfml-pi.sh          # compila e instala en /opt/sfml-pi (tarda)
+./build.sh                    # lo detecta solo y enlaza contra él
+```
+
+Después hay que ejecutarlo **desde una consola, sin escritorio** (Ctrl+Alt+F2).
+La resolución ya no se pide con `ANCHOxALTO`: con DRM la fija el modo de vídeo.
+
+```bash
+SFML_DRM_MODE=1280x720 ./FlappyBird
+SFML_DRM_DEBUG=1 ./FlappyBird     # imprime el modo elegido
+```
+
+`optimize-pi.sh --kiosk` lo detecta: si SFML-Pi está instalado, monta el kiosco
+**sin arrancar X**; si no, cae a la sesión X mínima de siempre.
+
+Decisiones que conviene conocer:
+
+- Se instala en **`/opt/sfml-pi`**, no en `/usr/local`. Un `make install` normal
+  pisaría el SFML del sistema y dejaría dos versiones peleándose; así se borra
+  con un `rm -rf` y no afecta a nada más. El binario lleva `rpath`, así que no
+  hace falta `LD_LIBRARY_PATH`.
+- Se usa **DRM/KMS y no DISPMANX**: DISPMANX solo existe para Pi 0–3 pero
+  necesita `/opt/vc`, que Raspberry Pi OS Bookworm ya no incluye.
+- Sin X11 la entrada se lee por udev desde `/dev/input/event*`, así que el
+  usuario debe estar en el grupo **`input`**. El script lo añade.
+
+**Su autor lo describe como experimental**, válido solo si te basta una ventana
+a pantalla completa — que es nuestro caso. Si algo va mal:
+`./install-sfml-pi.sh --uninstall && ./build.sh` vuelve al SFML normal.
 
 Si quieres jugar con mando, hace falta el módulo `joydev` y estar en el grupo
 `input` (ambos vienen de serie en Raspberry Pi OS). Comprobación rápida:
