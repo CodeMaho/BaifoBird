@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Genera los assets del juego a partir de los sprites nuevos de la raiz del proyecto.
+Genera los assets del juego a partir de los sprites de FlappyBird/imgs/.
 
 Salida: FlappyBird/FlappyBird-Linux/assets/ y FlappyBird/FlappyBird-Win/assets/
 Los assets originales estan en el historial de git, no se hace copia aparte.
@@ -15,7 +15,7 @@ from PIL import Image, ImageFilter
 from scipy import ndimage
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-SRC = ROOT
+SRC = os.path.join(ROOT, "FlappyBird", "imgs")   # sprites de partida
 DESTS = [
     os.path.join(ROOT, "FlappyBird", "FlappyBird-Linux", "assets"),
     os.path.join(ROOT, "FlappyBird", "FlappyBird-Win", "assets"),

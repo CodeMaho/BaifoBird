@@ -2,8 +2,8 @@
 # Compila FlappyBird para Linux (probado apuntando a Raspberry Pi OS / Debian).
 #
 #   sudo apt install build-essential libsfml-dev
-#   ./build.sh
-#   cd FlappyBird/FlappyBird-Linux && ./FlappyBird
+#   cd FlappyBird/FlappyBird-Linux
+#   ./build.sh && ./FlappyBird
 #
 # La fuente esta en src/ y la comparten Windows, Linux y Android. El binario se
 # deja en FlappyBird-Linux/ y DEBE ejecutarse desde ahi: las rutas de assets/,
@@ -15,9 +15,9 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
-SRC=FlappyBird/src
-OUT=FlappyBird/FlappyBird-Linux
-SQLITE=third_party/sqlite
+SRC=../src
+OUT=.
+SQLITE=../../third_party/sqlite
 
 if ! command -v g++ >/dev/null 2>&1; then
     echo "Falta g++.  sudo apt install build-essential" >&2
@@ -46,5 +46,5 @@ g++ -std=c++17 -O2 -Wall -Wno-unknown-pragmas -I "$SQLITE" -I "$SRC" \
     -lsfml-graphics -lsfml-window -lsfml-system -lsfml-audio \
     -lpthread -ldl -lm
 
-echo "OK -> $(pwd)/$OUT/FlappyBird"
-echo "Ejecutalo asi:  cd $OUT && ./FlappyBird"
+echo "OK -> $(pwd)/FlappyBird"
+echo "Ejecutalo desde aqui:  ./FlappyBird"

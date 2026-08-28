@@ -45,13 +45,14 @@ proyecto ([descarga](https://www.sfml-dev.org/download/sfml/2.6.2/), versión
 para Visual C++ de 64 bits).
 
 ```bat
-build.bat
 cd FlappyBird\FlappyBird-Win
+build.bat
 FlappyBird.exe
 ```
 
-El ejecutable **debe lanzarse desde `FlappyBird-Win\`**: las rutas de `assets\`,
-`audios\` y `fonts\` son relativas al directorio de trabajo.
+El script deja el ejecutable en esa misma carpeta, junto a `assets\`, `audios\`
+y `fonts\`, y **hay que lanzarlo desde ahi**: esas rutas son relativas al
+directorio de trabajo, no al del binario.
 
 Opciones:
 
@@ -66,15 +67,16 @@ FlappyBird.exe --help
 
 ```bash
 sudo apt install build-essential libsfml-dev
+cd FlappyBird/FlappyBird-Linux
 ./build.sh
-cd FlappyBird/FlappyBird-Linux && ./FlappyBird
+./FlappyBird
 ```
 
 Acepta las mismas opciones que en Windows. La primera compilación tarda porque
 compila SQLite; luego se reutiliza el `.o`.
 
 **En Raspberry Pi hay que compilar en el propio Pi**: un binario x86_64 no se
-ejecuta en ARM. Copia el proyecto y lanza `./build.sh` allí. Para arranque en
+ejecuta en ARM. Copia el proyecto y lanza `./build.sh` allí, desde `FlappyBird/FlappyBird-Linux/`. Para arranque en
 modo kiosco, `--fullscreen`.
 
 Si quieres jugar con mando, hace falta el módulo `joydev` y estar en el grupo
@@ -179,7 +181,7 @@ todo pulsando en la misma dirección.
 ### Los assets se generan con un script
 
 `build_assets.py` construye los 23 assets del juego a partir de los sprites
-originales de la raíz: recorta fondos (blanco en las cabras, negro en las
+originales de `FlappyBird/imgs/`: recorta fondos (blanco en las cabras, negro en las
 lanzas), normaliza los fotogramas de animación a un lienzo común, hace el suelo
 repetible y compone las medallas.
 
@@ -202,19 +204,22 @@ Dos detalles que conviene no romper:
 ## Estructura
 
 ```
-build.bat                 compila para Windows
-build.sh                  compila para Linux / Raspberry Pi
 build_assets.py           genera los assets desde los sprites originales
-*.jpg, *.png              sprites originales (fuente de build_assets.py)
 third_party/sqlite/       amalgamación de SQLite
 
 FlappyBird/
   src/                    FUENTE ÚNICA de las tres plataformas
-  FlappyBird-Win/         assets + DLL; build.bat deja aquí el .exe
-  FlappyBird-Linux/       assets; build.sh deja aquí el binario
+  imgs/                   sprites originales (entrada de build_assets.py)
+                          y capturas del juego
+  FlappyBird-Win/         build.bat + assets + DLL; el .exe queda aquí
+  FlappyBird-Linux/       build.sh  + assets;      el binario queda aquí
   FlappyBird-Android/     proyecto Gradle; usa ../src vía Android.mk
-  imgs/                   capturas
+  BaifoBird-debug.apk     APK listo para instalar
 ```
+
+Cada script de compilación vive en la carpeta de su plataforma y deja ahí el
+binario, junto a los datos que necesita. `build_assets.py` se queda en la raíz
+porque no es de ninguna plataforma: alimenta a las tres.
 
 `SFML-2.6.2/` no está en el repositorio: descárgalo aparte (ver arriba).
 

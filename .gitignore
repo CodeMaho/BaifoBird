@@ -5,8 +5,8 @@ scores.db-journal
 # Artefactos de compilacion
 FlappyBird/FlappyBird-Linux/FlappyBird
 FlappyBird/FlappyBird-Linux/sqlite3.o
-FlappyBird/FlappyBird-Win/FlappyBird.exe
 FlappyBird/FlappyBird-Win/build/
+FlappyBird/FlappyBird-Win/FlappyBird.exe
 *.obj
 *.o
 *.pdb
