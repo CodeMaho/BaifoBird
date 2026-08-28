@@ -5,6 +5,7 @@
 #
 #   sudo ./optimize-pi.sh --apply          optimiza el sistema
 #   sudo ./optimize-pi.sh --apply --kiosk  ademas, arranca solo el juego
+#   sudo ./optimize-pi.sh --apply --kiosk --mode=1024x768   resolucion del kiosco
 #   sudo ./optimize-pi.sh --apply --no-bluetooth   apaga tambien el Bluetooth
 #                                                  (NO lo uses si tu mando es BT)
 #   sudo ./optimize-pi.sh --revert         deshace todo
@@ -23,12 +24,14 @@
 set -uo pipefail
 
 APLICAR=0; REVERTIR=0; KIOSCO=0; SIMULAR=0; SIN_BT=0
+MODO_KIOSCO=1280x720      # resolucion de X en modo kiosco (--mode para cambiarla)
 for a in "$@"; do
     case "$a" in
         --apply)   APLICAR=1 ;;
         --revert)  REVERTIR=1 ;;
         --kiosk)   KIOSCO=1 ;;
         --no-bluetooth) SIN_BT=1 ;;
+        --mode=*)  MODO_KIOSCO="${a#*=}" ;;
         --dry-run) SIMULAR=1; APLICAR=1 ;;
         -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
         *) echo "Opcion desconocida: $a"; exit 1 ;;
@@ -234,6 +237,17 @@ AEOF
         cat > "$CASA/.xinitrc" <<XEOF
 #!/bin/sh
 [ -f "\$HOME/.xinitrc.baifobird-common" ] && . "\$HOME/.xinitrc.baifobird-common"
+
+# A pantalla completa se usa la resolucion del ESCRITORIO. En un monitor 1080p
+# eso son 2 Mpx y la Pi 3 se arrastra, asi que primero se baja el modo de X.
+# Si xrandr no puede, se sigue igual: el juego se adapta a lo que haya.
+if command -v xrandr >/dev/null 2>&1; then
+    SALIDA=\$(xrandr | awk '/ connected/{print \$1; exit}')
+    for MODO in $MODO_KIOSCO 1280x720 1024x768 800x600; do
+        xrandr --output "\$SALIDA" --mode "\$MODO" 2>/dev/null && break
+    done
+fi
+
 # sin gestor de ventanas: el juego es el unico cliente de X
 cd "$JUEGO_DIR" || exit 1
 exec ./FlappyBird --fullscreen

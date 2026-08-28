@@ -118,6 +118,7 @@ cd FlappyBird/FlappyBird-Linux
 ./optimize-pi.sh --dry-run          # enseña qué haría, sin tocar nada
 sudo ./optimize-pi.sh --apply       # optimiza el sistema
 sudo ./optimize-pi.sh --apply --kiosk   # además, arranca solo el juego
+sudo ./optimize-pi.sh --apply --kiosk --mode=1024x768   # otra resolución de kiosco
 sudo ./optimize-pi.sh --revert      # deshace todo
 ```
 
@@ -130,6 +131,7 @@ Qué hace:
 | Desactiva avahi, triggerhappy, ModemManager, cups | no pintan nada mientras se juega |
 | Sin salvapantallas ni apagado de pantalla | `xset s off -dpms` |
 | `--kiosk`: arranque a consola + autologin + X con el juego como único cliente | se ahorra el escritorio entero (compositor, panel, gestor de archivos) |
+| `--kiosk` baja el modo de X a 1280x720 antes de ir a pantalla completa | a pantalla completa se usa la resolución del escritorio: en un monitor 1080p serían 2 Mpx y la Pi 3 se arrastra |
 
 **Qué NO toca, a propósito:**
 
