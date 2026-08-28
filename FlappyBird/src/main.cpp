@@ -297,10 +297,28 @@ View gameView(unsigned winW, unsigned winH)
 	return v;
 }
 
+// La Raspberry Pi se identifica por el arbol de dispositivos. Su GPU va muy
+// justa de relleno, asi que ahi conviene abrir a menos resolucion por defecto;
+// en un PC seria un mal valor por defecto, de ahi la deteccion.
+bool isRaspberryPi()
+{
+#ifdef __linux__
+	ifstream f("/proc/device-tree/model");
+	if (!f)
+		return false;
+	string modelo;
+	getline(f, modelo);
+	return modelo.find("Raspberry Pi") != string::npos;
+#else
+	return false;
+#endif
+}
+
 struct WindowConfig
 {
 	unsigned width = DesignW;
 	unsigned height = DesignH;
+	bool sizeGiven = false;   // el usuario paso un ANCHOxALTO explicito
 	bool fullscreen = false;
 	bool helpRequested = false;
 	bool debug = false;      // FPS + cajas de colision en pantalla
@@ -345,6 +363,7 @@ bool parseArgs(int argc, char** argv, WindowConfig& cfg)
 		{
 			cfg.width = w;
 			cfg.height = h;
+			cfg.sizeGiven = true;
 			continue;
 		}
 		cerr << "Argumento no reconocido: " << a << "\n\n";
@@ -364,6 +383,18 @@ int main(int argc, char** argv)
 		printUsage(argv[0]);
 		// pedir ayuda no es un error; un argumento invalido si
 		return cfg.helpRequested ? EXIT_SUCCESS : EXIT_FAILURE;
+	}
+
+	// En una Pi, y solo si no se pidio un tamano concreto, se arranca a menos
+	// resolucion: el coste dominante es el relleno, o sea los pixeles de la
+	// ventana, no el tamano de las texturas. 800x538 son el 39% de los pixeles
+	// de 1280x860, conservando la proporcion del lienzo.
+	if (!cfg.sizeGiven && !cfg.fullscreen && isRaspberryPi())
+	{
+		cfg.width = 800;
+		cfg.height = (unsigned)(800.0 * DesignH / DesignW + 0.5);
+		cerr << "Raspberry Pi detectada: abriendo a " << cfg.width << "x" << cfg.height
+		     << " por rendimiento (pasa un tamano para forzar otro)" << endl;
 	}
 
 	VideoMode desktop = VideoMode::getDesktopMode();

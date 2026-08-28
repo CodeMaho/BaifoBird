@@ -82,14 +82,19 @@ modo kiosco, `--fullscreen`.
 
 ### Rendimiento en Raspberry Pi
 
-La Pi 3 va justa a 1280x860: son 1.1 Mpx dibujados varias veces por fotograma y
-la VideoCore IV se queda sin relleno. **Baja la resolución**, que es lo que más
-se nota:
+El juego **detecta la Raspberry Pi** (por `/proc/device-tree/model`) y arranca a
+**800x538** en vez de 1280x860, un 39 % de los píxeles. En un PC no cambia nada.
+
+El coste dominante es el *relleno*: los píxeles de la ventana, no el tamaño de
+las texturas. Por eso bajar resolución es lo que más se nota. Puedes forzar otra:
 
 ```bash
-./FlappyBird 800x480     # 3 veces menos pixeles que por defecto
-./FlappyBird 640x480
+./FlappyBird 640x430     # aún menos, si la Pi 3 sigue justa
+./FlappyBird 1280x860    # forzar el tamaño completo
 ```
+
+Ojo con `--fullscreen` en una Pi conectada a un monitor 1080p: usa la resolución
+del escritorio, o sea 2 Mpx, y ahí sí se arrastra. Mejor una ventana pequeña.
 
 Para medir en vez de suponer, `--debug` muestra FPS reales, el `dt` máximo y las
 cajas de colisión:
