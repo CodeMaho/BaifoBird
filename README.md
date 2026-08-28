@@ -108,6 +108,44 @@ tiempo toca su tope y el juego pasa a cámara lenta, con saltos grandes entre
 fotogramas que hacen que las colisiones *parezcan* injustas aunque sean
 correctas. Es la señal de que hay que bajar resolución.
 
+### Preparar la Pi al máximo (`optimize-pi.sh`)
+
+En `FlappyBird/FlappyBird-Linux/` hay un script que deja la Pi lo más despejada
+posible, y opcionalmente hace que **el juego sea lo único que arranca**:
+
+```bash
+cd FlappyBird/FlappyBird-Linux
+./optimize-pi.sh --dry-run          # enseña qué haría, sin tocar nada
+sudo ./optimize-pi.sh --apply       # optimiza el sistema
+sudo ./optimize-pi.sh --apply --kiosk   # además, arranca solo el juego
+sudo ./optimize-pi.sh --revert      # deshace todo
+```
+
+Qué hace:
+
+| Cambio | Por qué |
+|---|---|
+| `gpu_mem=128` | por defecto la VideoCore IV solo tiene 76 MB, justos para las texturas |
+| Gobernador `performance` | `ondemand` baja la CPU a 600 MHz y sube tarde: tirones al arrancar el movimiento |
+| Desactiva avahi, triggerhappy, ModemManager, cups | no pintan nada mientras se juega |
+| Sin salvapantallas ni apagado de pantalla | `xset s off -dpms` |
+| `--kiosk`: arranque a consola + autologin + X con el juego como único cliente | se ahorra el escritorio entero (compositor, panel, gestor de archivos) |
+
+**Qué NO toca, a propósito:**
+
+- **SSH y la red.** Apagarlos en una Pi headless es quedarse sin acceso a la
+  máquina, y no compensa por unos FPS.
+- **El Bluetooth**, salvo que se pida con `--no-bluetooth`: los mandos
+  inalámbricos lo necesitan.
+- **La swap** (riesgo de quedarse sin memoria) y **el overclock** (depende de la
+  placa y su refrigeración).
+
+Antes de modificar nada copia los ficheros a `/var/backups/baifobird-<fecha>/`,
+y `--revert` los restaura. Se niega a ejecutarse si no detecta una Raspberry Pi.
+
+En modo kiosco: **ESC** en el menú principal cierra el juego, y **Ctrl+Alt+F2**
+te lleva a una consola.
+
 Si quieres jugar con mando, hace falta el módulo `joydev` y estar en el grupo
 `input` (ambos vienen de serie en Raspberry Pi OS). Comprobación rápida:
 `ls /dev/input/js*` debe listar algo con el mando encendido.
