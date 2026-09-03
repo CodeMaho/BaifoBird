@@ -4,6 +4,8 @@ scores.db-journal
 
 # Artefactos de compilacion
 FlappyBird/FlappyBird-Linux/FlappyBird
+# build.sh enlaza a este nombre y luego lo renombra; queda suelto si falla
+FlappyBird/FlappyBird-Linux/FlappyBird.nuevo
 FlappyBird/FlappyBird-Linux/sqlite3.o
 FlappyBird/FlappyBird-Win/build/
 FlappyBird/FlappyBird-Win/FlappyBird.exe

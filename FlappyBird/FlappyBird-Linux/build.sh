@@ -73,15 +73,27 @@ fi
 # palabras ("-I" y la ruta) y hay que dejar que el shell las separe. Entre
 # comillas llegarian como un unico argumento y g++ no las entenderia; vacias, no
 # aportan nada, que es el caso del SFML del sistema.
+# Se compila a un nombre temporal y se mueve al definitivo. Escribir DIRECTAMENTE
+# sobre el binario falla con "Text file busy" si el juego esta corriendo, que es
+# justo lo que pasa en modo kiosco: recompilar tras un 'git pull' es el caso
+# normal, y ahi el juego siempre esta en marcha. Un rename si esta permitido
+# aunque el fichero se este ejecutando: el proceso vivo conserva su inodo y el
+# binario nuevo queda en su sitio para el proximo arranque.
 # shellcheck disable=SC2086
 g++ -std=c++17 -O2 -Wall -Wno-unknown-pragmas $SFML_DEFS $SFML_INC -I "$SQLITE" -I "$SRC" \
-    "$SRC/main.cpp" "$SRC/scoredb.cpp" "$OUT/sqlite3.o" -o "$OUT/FlappyBird" \
+    "$SRC/main.cpp" "$SRC/scoredb.cpp" "$OUT/sqlite3.o" -o "$OUT/FlappyBird.nuevo" \
     $SFML_LIB $SFML_RPATH \
     -lsfml-graphics -lsfml-window -lsfml-system -lsfml-audio \
     $SFML_EXTRA \
     -lpthread -ldl -lm
 
+mv -f "$OUT/FlappyBird.nuevo" "$OUT/FlappyBird"
+
 echo "OK -> $(pwd)/FlappyBird"
+if pgrep -x FlappyBird >/dev/null 2>&1; then
+    echo "aviso: hay una copia del juego EN MARCHA con el binario anterior."
+    echo "       en modo kiosco:  sudo systemctl restart getty@tty1.service"
+fi
 
 # Comprobacion, no adorno: durante un tiempo el script anunciaba SFML-Pi y
 # enlazaba igualmente contra el del sistema, porque las variables de arriba no
