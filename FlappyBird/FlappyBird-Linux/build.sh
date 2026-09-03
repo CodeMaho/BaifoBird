@@ -97,14 +97,20 @@ fi
 
 # Comprobacion, no adorno: durante un tiempo el script anunciaba SFML-Pi y
 # enlazaba igualmente contra el del sistema, porque las variables de arriba no
-# llegaban al g++. Se verifica sobre el binario ya hecho, que es la unica prueba
-# que no se puede falsear.
+# llegaban al g++. Se verifica sobre el binario ya hecho.
+#
+# Se lee el RUNPATH de la cabecera ELF y NO se usa ldd: ldd resuelve las
+# dependencias EJECUTANDO el binario, y sobre uno recien enlazado eso dio algun
+# falso negativo suelto que no se llego a explicar. readelf solo lee el fichero,
+# asi que no depende de que se pueda ejecutar ni de nada del entorno.
 if [ -n "$SFML_LIB" ]; then
-    if ldd "$OUT/FlappyBird" 2>/dev/null | grep -q "$SFML_PI/lib"; then
+    if readelf -d "$OUT/FlappyBird" 2>/dev/null \
+        | grep -qE "R(UN)?PATH.*$SFML_PI/lib"; then
         echo "verificado: enlazado contra SFML-Pi (sin X11)"
     else
         echo "AVISO: se detecto SFML-Pi pero el binario NO lo esta usando." >&2
-        echo "       revisa 'ldd ./FlappyBird'; el kiosco sin X no se activara." >&2
+        echo "       comprueba 'readelf -d ./FlappyBird | grep PATH'." >&2
+        echo "       el kiosco sin X no se activara." >&2
     fi
 fi
 

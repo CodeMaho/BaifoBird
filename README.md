@@ -292,12 +292,18 @@ cd FlappyBird/FlappyBird-Linux
 independiente es:
 
 ```bash
-ldd ./FlappyBird | grep sfml     # debe apuntar a /opt/sfml-pi/lib
+readelf -d ./FlappyBird | grep PATH   # RUNPATH -> /opt/sfml-pi/lib
+ldd ./FlappyBird | grep sfml          # más legible, mismo veredicto
 ```
 
+Los scripts usan **`readelf`, no `ldd`**: `ldd` resuelve las dependencias
+*ejecutando* el binario, y sobre uno recién enlazado dio algún falso negativo
+suelto que no se llegó a explicar. `readelf` solo lee la cabecera ELF, así que
+no depende de que el binario pueda ejecutarse ni del entorno.
+
 Esto importa porque de esa comprobación depende todo lo demás: `optimize-pi.sh
---kiosk` decide si monta el kiosco sin X mirando precisamente ese `ldd`. Si el
-binario quedó enlazado contra el SFML del sistema, el kiosco arrancará X sin
+--kiosk` decide si monta el kiosco sin X mirando precisamente ese `RUNPATH`. Si
+el binario quedó enlazado contra el SFML del sistema, el kiosco arrancará X sin
 decir nada.
 
 Después hay que ejecutarlo **desde una consola, sin escritorio** (Ctrl+Alt+F2).

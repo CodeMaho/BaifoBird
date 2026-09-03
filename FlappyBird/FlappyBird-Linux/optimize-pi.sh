@@ -280,7 +280,11 @@ if [ $KIOSCO -eq 1 ]; then
     # Con SFML-Pi no hace falta servidor grafico: el juego pinta directo por
     # DRM/KMS desde la consola. Es el mejor caso posible en una Pi 3.
     SIN_X=0
-    if [ -d /opt/sfml-pi/include/SFML ] && ldd "$JUEGO_DIR/FlappyBird" 2>/dev/null | grep -q "/opt/sfml-pi/"; then
+    # Se mira el RUNPATH de la cabecera ELF, no 'ldd': ldd resuelve ejecutando el
+    # binario, y aqui un falso negativo no da un error visible, monta el kiosco
+    # CON servidor grafico y te deja creyendo que va sin el.
+    if [ -d /opt/sfml-pi/include/SFML ] \
+       && readelf -d "$JUEGO_DIR/FlappyBird" 2>/dev/null | grep -qE "R(UN)?PATH.*/opt/sfml-pi/lib"; then
         SIN_X=1
         info "SFML-Pi detectado: kiosco SIN servidor grafico"
     elif ! command -v xinit >/dev/null 2>&1; then
