@@ -80,6 +80,24 @@ compila SQLite; luego se reutiliza el `.o`.
 ejecuta en ARM. Copia el proyecto y lanza `./build.sh` allí, desde `FlappyBird/FlappyBird-Linux/`. Para arranque en
 modo kiosco, `--fullscreen`.
 
+> **Tras cada `git pull` hay que volver a lanzar `./build.sh`.** El ejecutable
+> no está en el repositorio —`.gitignore` excluye
+> `FlappyBird/FlappyBird-Linux/FlappyBird`— así que actualizar el código deja el
+> binario viejo tal cual estaba y el juego sigue comportándose igual que antes.
+> Es rápido: `sqlite3.o` queda cacheado y solo se recompilan `main.cpp` y
+> `scoredb.cpp`. Si tienes el modo kiosco puesto, después `sudo reboot`.
+
+> **No lo lances nunca con `sudo`.** `scores.db` se crea con el dueño del
+> proceso, así que una sola partida como root deja el fichero en `root:root` y a
+> partir de ahí el juego ya no puede escribirlo: sigue siendo jugable, pero no
+> guarda nada y solo avisa por `stderr` —invisible en modo kiosco—. Si te ha
+> pasado:
+>
+> ```bash
+> ls -l scores.db                  # ¿pone root root?
+> sudo chown $USER:$USER scores.db
+> ```
+
 ### Rendimiento en Raspberry Pi
 
 El juego **detecta la Raspberry Pi** (por `/proc/device-tree/model`) y arranca a
@@ -93,8 +111,28 @@ las texturas. Por eso bajar resolución es lo que más se nota. Puedes forzar ot
 ./FlappyBird 1280x860    # forzar el tamaño completo
 ```
 
-Ojo con `--fullscreen` en una Pi conectada a un monitor 1080p: usa la resolución
-del escritorio, o sea 2 Mpx, y ahí sí se arrastra. Mejor una ventana pequeña.
+`--fullscreen` **ya no hereda la resolución del escritorio en una Pi**. Antes sí,
+y era una trampa: en el monitor de pruebas el escritorio estaba a 1280x720 y el
+juego pasaba de 430.400 px a 921.600 sin avisar. Ahora busca el modo de vídeo
+anunciado más grande que no pase del presupuesto de 800x538 y usa ese; en ese
+monitor sale 720x480, que además tiene casi la misma proporción que el lienzo
+(1.50 frente a 1.49). Lo dice al arrancar:
+
+```
+Raspberry Pi detectada: pantalla completa a 720x480 en vez de 1280x720
+```
+
+Si quieres otro, ahora `--fullscreen` respeta el tamaño explícito siempre que el
+driver anuncie ese modo (`xrandr` los lista):
+
+```bash
+./FlappyBird 800x600 --fullscreen
+```
+
+Y el **tope de fotogramas en Pi es 60**, no 144. En un monitor que anuncie
+1280x720 a 120 Hz —el caso real que motivó el cambio— el vsync pedía 120
+fotogramas por segundo. Renderizar por encima de 60 en una Pi es trabajo tirado:
+el juego está diseñado para 60 y el resto solo calienta la placa.
 
 Para medir en vez de suponer, `--debug` muestra FPS reales, el `dt` máximo y las
 cajas de colisión:
@@ -108,6 +146,52 @@ tiempo toca su tope y el juego pasa a cámara lenta, con saltos grandes entre
 fotogramas que hacen que las colisiones *parezcan* injustas aunque sean
 correctas. Es la señal de que hay que bajar resolución.
 
+### Antes de culpar al juego: alimentación
+
+Ninguna optimización de código compensa una Pi mal alimentada. **Comprueba esto
+primero**, porque contamina cualquier otra medida:
+
+```bash
+vcgencmd get_throttled     # lo quieres a 0x0
+vcgencmd measure_temp
+vcgencmd measure_clock arm # un 3 B+ sano da 1.400.000.000 bajo carga
+```
+
+`get_throttled` es un mapa de bits:
+
+| bit | valor | significado |
+|---|---|---|
+| 0 | `0x1` | bajo voltaje **ahora mismo** |
+| 1 | `0x2` | frecuencia de ARM recortada ahora |
+| 2 | `0x4` | limitada **ahora mismo** |
+| 16 | `0x10000` | ha habido bajo voltaje desde el arranque |
+| 18 | `0x40000` | ha habido limitación desde el arranque |
+
+En la Pi 3 B+ de pruebas salía **`0x50005`** (bits 0, 2, 16 y 18) a solo 54,8 °C
+—o sea, no era calor— con la CPU clavada en **600 MHz**, el 43 % de su
+frecuencia. La pista definitiva es la contradicción entre estas dos lecturas:
+
+```bash
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq   # 1400000
+vcgencmd measure_clock arm                                  # 600000000
+```
+
+El kernel cree que va a 1,4 GHz y el firmware mide 600 MHz. Eso es el recorte
+por bajo voltaje: el firmware ignora al kernel. Un Pi 3 B+ pide **5,1 V y 2,5 A
+reales**, y la causa más frecuente no es el cargador sino **el cable**: fino,
+largo, o de los que solo sirven para cargar.
+
+Que la aceleración por hardware esté activa se comprueba aparte:
+
+```bash
+ls /dev/dri                                       # card0 y renderD128
+grep -n vc4 /boot/firmware/config.txt             # dtoverlay=vc4-kms-v3d
+sudo apt install -y mesa-utils && glxinfo -B | grep -i renderer
+```
+
+Si `glxinfo` dice **`llvmpipe`**, estás renderizando por CPU y no hay nada que
+optimizar en el juego hasta arreglar eso.
+
 ### Preparar la Pi al máximo (`optimize-pi.sh`)
 
 En `FlappyBird/FlappyBird-Linux/` hay un script que deja la Pi lo más despejada
@@ -119,6 +203,7 @@ cd FlappyBird/FlappyBird-Linux
 sudo ./optimize-pi.sh --apply       # optimiza el sistema
 sudo ./optimize-pi.sh --apply --kiosk   # además, arranca solo el juego
 sudo ./optimize-pi.sh --apply --kiosk --mode=1024x768   # otra resolución de kiosco
+sudo ./optimize-pi.sh --apply --kiosk --rate=50         # otros Hz de kiosco
 sudo ./optimize-pi.sh --revert      # deshace todo
 ```
 
@@ -127,11 +212,23 @@ Qué hace:
 | Cambio | Por qué |
 |---|---|
 | `gpu_mem=128` | por defecto la VideoCore IV solo tiene 76 MB, justos para las texturas |
-| Gobernador `performance` | `ondemand` baja la CPU a 600 MHz y sube tarde: tirones al arrancar el movimiento |
+| Gobernador `performance`, vía unidad de systemd | `ondemand` baja la CPU a 600 MHz y sube tarde: tirones al arrancar el movimiento |
 | Desactiva avahi, triggerhappy, ModemManager, cups | no pintan nada mientras se juega |
 | Sin salvapantallas ni apagado de pantalla | `xset s off -dpms` |
 | `--kiosk`: arranque a consola + autologin + X con el juego como único cliente | se ahorra el escritorio entero (compositor, panel, gestor de archivos) |
-| `--kiosk` baja el modo de X a 1280x720 antes de ir a pantalla completa | a pantalla completa se usa la resolución del escritorio: en un monitor 1080p serían 2 Mpx y la Pi 3 se arrastra |
+| `--kiosk` pone X a **800x600 @ 60 Hz** antes de ir a pantalla completa | 480.000 px, cerca del presupuesto de 800x538 |
+
+Dos detalles que costaron una tarde de diagnóstico:
+
+- El gobernador se fija con una **unidad de systemd**, no escribiendo
+  `/etc/default/cpufrequtils`. Ese fichero solo lo lee el paquete
+  `cpufrequtils`, que Raspberry Pi OS **no trae instalado**: durante un tiempo el
+  script decía haber fijado `performance` y la Pi seguía en `ondemand` después
+  de cada reinicio.
+- El `xrandr` del kiosco pasa **`--rate`**. Sin él, `xrandr --mode 1280x720`
+  cogía el primer modo de la lista, que en el monitor de pruebas era de
+  **120 Hz**: el vsync pedía 120 fotogramas de 921.600 px a una Pi 3, unas
+  4,3 veces el relleno que se pretendía.
 
 **Qué NO toca, a propósito:**
 
@@ -161,6 +258,14 @@ de llamadas de dibujo: durante la partida son solo ~10.
 | Mipmaps en los fondos | siempre salen escalados; leer de un nivel reducido gasta menos ancho de banda y quita el parpadeo |
 | El marcador solo se regenera al cambiar | `setString` reconstruye la geometría del texto |
 | Resolución por defecto de 800x538 en Pi | 39 % de los píxeles |
+| `--fullscreen` elige el modo más pequeño que quepa en el presupuesto | heredar el del escritorio duplicaba los píxeles sin avisar |
+| Tope de 60 fps en Pi en vez de 144 | un monitor que anuncie 120 Hz pedía el doble de fotogramas |
+| Kiosco a 800x600 **@ 60 Hz** | sin `--rate`, `xrandr` cogía el primer modo, que era de 120 Hz |
+| Sin servidor gráfico (SFML-Pi) | se ahorra Xorg entero: CPU, memoria y una copia por fotograma |
+
+Las cuatro últimas salieron de medir una Pi 3 B+ real. La combinación que había
+—kiosco a 1280x720 a 120 Hz— pedía **110,6 Mpx/s**; con 800x600 a 60 fps son
+**28,8 Mpx/s**, y sin X por medio.
 
 **No** se quitó `window.clear()`, aunque el fondo ya cubre toda la pantalla: la
 VideoCore IV es un renderizador **por tiles**, y ahí el `clear` le dice al driver
@@ -179,15 +284,50 @@ que dibuja directamente por **DRM/KMS**, sin servidor gráfico.
 ```bash
 cd FlappyBird/FlappyBird-Linux
 ./install-sfml-pi.sh          # compila e instala en /opt/sfml-pi (tarda)
-./build.sh                    # lo detecta solo y enlaza contra él
+./build.sh                    # lo detecta y enlaza contra él, con rpath
 ```
 
-Después hay que ejecutarlo **desde una consola, sin escritorio** (Ctrl+Alt+F2).
-La resolución ya no se pide con `ANCHOxALTO`: con DRM la fija el modo de vídeo.
+**Comprueba que de verdad lo está usando.** `build.sh` termina diciendo
+`verificado: enlazado contra SFML-Pi (sin X11)`, y si no, avisa. La prueba
+independiente es:
 
 ```bash
-SFML_DRM_MODE=1280x720 ./FlappyBird
+ldd ./FlappyBird | grep sfml     # debe apuntar a /opt/sfml-pi/lib
+```
+
+Esto importa porque de esa comprobación depende todo lo demás: `optimize-pi.sh
+--kiosk` decide si monta el kiosco sin X mirando precisamente ese `ldd`. Si el
+binario quedó enlazado contra el SFML del sistema, el kiosco arrancará X sin
+decir nada.
+
+Después hay que ejecutarlo **desde una consola, sin escritorio** (Ctrl+Alt+F2).
+Con DRM **no existen las ventanas**: solo hay los modos de vídeo que el conector
+anuncia, y la resolución la fija el modo, no un `ANCHOxALTO` cualquiera.
+
+```bash
+SFML_DRM_MODE=800x600 ./FlappyBird
 SFML_DRM_DEBUG=1 ./FlappyBird     # imprime el modo elegido
+```
+
+Por eso `build.sh` define **`-DBAIFOBIRD_DRM`** cuando enlaza contra SFML-Pi, y
+con ese macro el juego fuerza pantalla completa y deja de pedir su tamaño
+cómodo de ventana. Sin eso pedía 800x538 —que no es un modo de vídeo real— y
+moría al arrancar con un mensaje que no orienta nada:
+
+```
+Failed to set mode: No space left on device
+```
+
+Ese `ENOSPC` es lo que devuelve `drmModeSetCrtc` cuando el modo pedido no
+existe. **No tiene nada que ver con el disco**, aunque lo parezca: si te sale,
+`df -h` estará perfectamente y el problema es la resolución.
+
+Un detalle práctico para diagnosticar: en modo kiosco sin X, la salida de error
+del juego se pierde en la consola. Para verla, redirige a un fichero en el
+bloque de arranque de `~/.bash_profile`:
+
+```bash
+SFML_DRM_MODE=800x600 exec ./FlappyBird > /tmp/baifobird.log 2>&1
 ```
 
 `optimize-pi.sh --kiosk` lo detecta: si SFML-Pi está instalado, monta el kiosco
@@ -203,6 +343,12 @@ Decisiones que conviene conocer:
   necesita `/opt/vc`, que Raspberry Pi OS Bookworm ya no incluye.
 - Sin X11 la entrada se lee por udev desde `/dev/input/event*`, así que el
   usuario debe estar en el grupo **`input`**. El script lo añade.
+- `build.sh` añade **`-lgbm`** al enlazar. Su `libsfml-window.so` usa símbolos
+  de GBM pero no declara `libgbm` entre sus dependencias
+  (`objdump -p libsfml-window.so | grep NEEDED` lista `libdrm`, `libEGL`,
+  `libudev` y `libGL`, pero no `libgbm`), así que el ejecutable tiene que
+  aportarla o el enlazado muere con veinte `referencia a gbm_* sin definir`.
+  Es un descuido del empaquetado del fork, no algo que se pueda arreglar aquí.
 
 **Su autor lo describe como experimental**, válido solo si te basta una ventana
 a pantalla completa — que es nuestro caso. Si algo va mal:
@@ -211,6 +357,21 @@ a pantalla completa — que es nuestro caso. Si algo va mal:
 Si quieres jugar con mando, hace falta el módulo `joydev` y estar en el grupo
 `input` (ambos vienen de serie en Raspberry Pi OS). Comprobación rápida:
 `ls /dev/input/js*` debe listar algo con el mando encendido.
+
+### Errores que no significan lo que parece
+
+Todos estos son reales, salieron poniendo esto en marcha en una Pi 3 B+, y en
+todos el mensaje apunta al sitio equivocado.
+
+| Mensaje | Qué es en realidad |
+|---|---|
+| `Failed to set mode: No space left on device` | **No es el disco.** Es `ENOSPC` de `drmModeSetCrtc`: pediste una resolución que no es un modo de vídeo real. Comprueba `SFML_DRM_MODE` contra los modos que anuncia el monitor |
+| `Failed to set mode: Permission denied` | Estás lanzándolo por SSH. Con DRM hace falta ser *DRM master*, y eso solo pasa en la consola física (`Ctrl+Alt+F2`) |
+| `Failed to open X11 display` | Binario enlazado contra el SFML **del sistema**, ejecutándose sin X. O te falta `DISPLAY=:0`, o querías SFML-Pi y `ldd` te dirá que no lo tienes |
+| `attempt to write a readonly database` | `scores.db` es de otro usuario, casi siempre `root` por haber lanzado el juego una vez con `sudo`. `sudo chown $USER:$USER scores.db` |
+| El juego arranca y se cierra en bucle | Míralo en un log: en kiosco sin X, `stderr` se pierde en la consola. Ver arriba cómo redirigirlo |
+| `optimize-pi.sh` dice `performance` pero sigue en `ondemand` | Versiones viejas escribían `/etc/default/cpufrequtils`, que **nadie lee** si el paquete no está instalado. Ahora se usa una unidad de systemd; compruébalo con `systemctl is-enabled baifobird-governor` |
+| Va lento aunque todo esté bien configurado | Mira la alimentación antes que nada: `vcgencmd get_throttled`. Ver la sección de arriba |
 
 ## Ejecutar en Android
 
@@ -246,6 +407,18 @@ cd FlappyBird/FlappyBird-Android && gradle assembleDebug
 `build.bat`, `build.sh` y el `Android.mk` de Gradle. No hay copias por
 plataforma, así que un cambio llega a las tres a la vez. Lo específico de
 Android son unas pocas líneas bajo `#ifdef SFML_SYSTEM_ANDROID`.
+
+Como consecuencia, el código tiene que compilar contra **tres SFML distintos**:
+2.6.2 en Windows y Android, el 2.5.1 parcheado de Debian en Raspberry Pi OS, y
+el 2.5.1 de origen en SFML-Pi. Eso obliga a una convención que parece
+retrógrada y no lo es:
+
+> **Usa `Keyboard::Return` y `Keyboard::BackSpace`, no `Enter` ni `Backspace`.**
+> SFML 2.6 renombró esas dos teclas dejando los nombres viejos como alias.
+> Debian retroportó el cambio a su paquete 2.5.1, así que en Raspberry Pi OS
+> compilan los dos nombres y la incompatibilidad no se nota — hasta que
+> enlazas contra SFML-Pi, que es un fork del 2.5.1 **sin** ese parche, y el
+> juego deja de compilar. Los nombres viejos existen en las tres versiones.
 
 ### Movimiento por tiempo, no por fotograma
 
@@ -354,6 +527,9 @@ FlappyBird/
                           y capturas del juego
   FlappyBird-Win/         build.bat + assets + DLL; el .exe queda aquí
   FlappyBird-Linux/       build.sh  + assets;      el binario queda aquí
+      build.sh            compila; detecta SFML-Pi y enlaza contra él
+      install-sfml-pi.sh  instala SFML-Pi en /opt (juego sin servidor gráfico)
+      optimize-pi.sh      prepara la Pi y monta el modo kiosco
   FlappyBird-Android/     proyecto Gradle; usa ../src vía Android.mk
   BaifoBird-debug.apk     APK listo para instalar
 ```

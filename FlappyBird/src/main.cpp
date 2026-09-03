@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <ctime>
 #include <string>   // to_string: en MSVC llega de arrastre, en libstdc++ conviene pedirlo
+#include <vector>   // getFullscreenModes(); llega de arrastre por VideoMode.hpp, pero igual
 #include <cctype>
 #include "scoredb.h"
 
@@ -67,9 +68,22 @@ const float MaxFrameTime = 0.05f;
 //     tope 144        -> 144 FPS   (no interfiere)
 //     tope 120        -> 106 FPS   (vsync y tope se pelean)
 // Es decir: un tope IGUAL O POR ENCIMA de la tasa de refresco es inocuo, y por
-// debajo estropea el ritmo. 144 cubre 60 Hz (Pi) y 144 Hz (escritorio). Si algun
-// dia se usa un monitor mas rapido, hay que subirlo.
+// debajo estropea el ritmo. 144 cubre 144 Hz de escritorio; si algun dia se usa
+// un monitor mas rapido, hay que subirlo.
 const int FpsCap = 144;
+
+// En una Pi el razonamiento se invierte. Medido en una Pi 3 B+ con un monitor
+// que anuncia 1280x720 a 120 Hz: X coge ese modo, el vsync marca 120 y el juego
+// intenta rellenar 110 Mpx/s. La VideoCore IV no da para eso ni de lejos.
+//
+// Aqui el tope NO es una red de seguridad, es un limite deliberado: renderizar
+// por encima de 60 en una Pi es trabajo tirado, porque el juego se disena para
+// 60 y el resto solo calienta la placa. Si el vsync va a 120, el tope queda POR
+// DEBAJO y el ritmo sale menos regular -es el caso "se pelean" de arriba-, pero
+// aun asi compensa: la mitad de fotogramas irregulares es mucho mejor que
+// intentar el doble y no llegar. Lo ideal es que el modo de video ya este a 60,
+// que es lo que hace optimize-pi.sh con 'xrandr --rate 60'.
+const int FpsCapPi = 60;
 
 // LIENZO DE DISENO. Todo el juego (posiciones, tamanos, colisiones, fondos) se
 // dibuja SIEMPRE en estas coordenadas, sea cual sea el tamano real de ventana.
@@ -363,6 +377,55 @@ bool isRaspberryPi()
 #endif
 }
 
+// Presupuesto de pixeles de una Pi: los mismos 800x538 que se usan en ventana.
+const unsigned PiPixelBudget = 800u * 538u;
+
+// A pantalla completa NO se puede abrir a cualquier tamano: SFML exige un modo
+// que el driver anuncie como valido, asi que hasta ahora se heredaba el del
+// escritorio. En la Pi 3 medida eso eran 1280x720, el doble del presupuesto, y
+// ademas a 120 Hz.
+//
+// Aqui se elige el modo ANUNCIADO mas grande que no pase del presupuesto. En el
+// monitor de prueba (1920x1080 / 1280x720 / 1024x768 / 800x600 / 720x480 /
+// 640x480) sale 720x480: 345.600 px y proporcion 1.50, casi calcada a la del
+// lienzo de diseno (1280/860 = 1.49).
+//
+// Si ningun modo baja del presupuesto -un panel que solo anuncie 1080p- se coge
+// el mas pequeno que haya, que es lo mejor disponible.
+VideoMode piFullscreenMode(const VideoMode& desktop)
+{
+	const vector<VideoMode>& modos = VideoMode::getFullscreenModes();
+	VideoMode elegido = desktop;
+	unsigned pxElegido = 0;          // 0 = aun no hay candidato
+	VideoMode menor = desktop;
+	unsigned pxMenor = desktop.width * desktop.height;
+
+	for (size_t i = 0; i < modos.size(); ++i)
+	{
+		const VideoMode& m = modos[i];
+		// Mezclar profundidades de color daria modos duplicados y un cambio de
+		// bpp que no queremos.
+		if (m.bitsPerPixel != desktop.bitsPerPixel)
+			continue;
+		// Por debajo de esto el pixel art del marcador ya no se lee.
+		if (m.width < 640 || m.height < 400)
+			continue;
+
+		unsigned px = m.width * m.height;
+		if (px < pxMenor)
+		{
+			menor = m;
+			pxMenor = px;
+		}
+		if (px <= PiPixelBudget && px > pxElegido)
+		{
+			elegido = m;
+			pxElegido = px;
+		}
+	}
+	return pxElegido > 0 ? elegido : menor;
+}
+
 struct WindowConfig
 {
 	unsigned width = DesignW;
@@ -434,11 +497,31 @@ int main(int argc, char** argv)
 		return cfg.helpRequested ? EXIT_SUCCESS : EXIT_FAILURE;
 	}
 
+	// Se consulta una sola vez -lee un fichero de /proc- y hace falta en tres
+	// sitios: resolucion de ventana, resolucion de pantalla completa y tope de
+	// fotogramas.
+	const bool enPi = isRaspberryPi();
+
+#ifdef BAIFOBIRD_DRM
+	// Compilado contra SFML-Pi: se pinta por DRM/KMS, sin servidor grafico.
+	// Ahi NO EXISTEN las ventanas, solo los modos de video que el conector
+	// anuncia. Pedir 800x538 -el tamano comodo que se usa en ventana- hacia que
+	// drmModeSetCrtc devolviera ENOSPC y el juego muriera nada mas arrancar con
+	// "Failed to set mode: No space left on device", un mensaje que no ayuda
+	// nada a entender que el problema era la resolucion.
+	//
+	// Se fuerza pantalla completa, que es el unico modo que SFML-Pi soporta
+	// -su autor lo dice explicitamente- y la resolucion la elige el modo de
+	// video: la variable de entorno SFML_DRM_MODE, o un ANCHOxALTO que sea un
+	// modo real.
+	cfg.fullscreen = true;
+#endif
+
 	// En una Pi, y solo si no se pidio un tamano concreto, se arranca a menos
 	// resolucion: el coste dominante es el relleno, o sea los pixeles de la
 	// ventana, no el tamano de las texturas. 800x538 son el 39% de los pixeles
 	// de 1280x860, conservando la proporcion del lienzo.
-	if (!cfg.sizeGiven && !cfg.fullscreen && isRaspberryPi())
+	if (!cfg.sizeGiven && !cfg.fullscreen && enPi)
 	{
 		cfg.width = 800;
 		cfg.height = (unsigned)(800.0 * DesignH / DesignW + 0.5);
@@ -462,6 +545,40 @@ int main(int argc, char** argv)
 	if (cfg.fullscreen && desktop.isValid())
 	{
 		mode = desktop;
+
+		// Un ANCHOxALTO explicito manda tambien a pantalla completa, siempre que
+		// el driver anuncie ese modo. Antes se ignoraba y se cogia el del
+		// escritorio, asi que "--fullscreen 800x600" no servia de nada.
+		if (cfg.sizeGiven && VideoMode(cfg.width, cfg.height).isValid())
+		{
+			mode = VideoMode(cfg.width, cfg.height);
+		}
+		else if (cfg.sizeGiven)
+		{
+			cerr << "El modo " << cfg.width << "x" << cfg.height
+			     << " no esta disponible a pantalla completa; se usa "
+			     << desktop.width << "x" << desktop.height << endl;
+		}
+#ifdef BAIFOBIRD_DRM
+		// Con DRM manda el modo de video, que ya lo fija SFML_DRM_MODE. Elegir
+		// aqui otro distinto seria pisar lo que el usuario -o el kiosco- pidio.
+#else
+		// Sin tamano explicito, en una Pi NO se hereda el del escritorio: es la
+		// via por la que el modo kiosco acababa rellenando 1280x720.
+		else if (enPi)
+		{
+			VideoMode m = piFullscreenMode(desktop);
+			if (m.width * m.height < desktop.width * desktop.height)
+			{
+				mode = m;
+				cerr << "Raspberry Pi detectada: pantalla completa a "
+				     << mode.width << "x" << mode.height << " en vez de "
+				     << desktop.width << "x" << desktop.height
+				     << " (pasa un tamano para forzar otro)" << endl;
+			}
+		}
+#endif
+
 		style = Style::Fullscreen;
 	}
 	else
@@ -489,7 +606,7 @@ int main(int argc, char** argv)
 	// Sin esto, mantener espacio pulsado hace que el sistema emita KeyPressed
 	// repetidos (~30/s tras medio segundo) y el salto volveria a ser mantenible.
 	window.setKeyRepeatEnabled(false);
-	window.setFramerateLimit(FpsCap);
+	window.setFramerateLimit(enPi ? FpsCapPi : FpsCap);
 	Clock frameClock;
 
 	/*     TEXTURES & SPRITES     */
@@ -1099,7 +1216,14 @@ int main(int argc, char** argv)
 				case Keyboard::Down:
 				case Keyboard::Right:
 					navNext = true; padActive = true; break;
-				case Keyboard::Enter:
+				// Return, y no Enter. SFML 2.6 renombro estas dos teclas
+				// (Return -> Enter, BackSpace -> Backspace) dejando los nombres
+				// viejos como alias. Debian retroporto el cambio a su paquete
+				// 2.5.1, asi que en Raspberry Pi OS compilaban los dos nombres
+				// y no se noto; pero SFML-Pi es un fork del 2.5.1 DE ORIGEN y
+				// ahi 'Enter' no existe: al enlazar contra el, el juego dejaba
+				// de compilar. Los nombres viejos valen en las tres versiones.
+				case Keyboard::Return:
 					confirmPressed = true; padActive = true; break;
 				default: break;
 				}
@@ -1147,8 +1271,9 @@ int main(int argc, char** argv)
 						}
 					}
 				}
+				// BackSpace, no Backspace: ver el comentario de Keyboard::Return.
 				if (event.type == Event::KeyPressed
-					&& event.key.code == Keyboard::Backspace)
+					&& event.key.code == Keyboard::BackSpace)
 				{
 					nameFresh = false;
 					// Borra la casilla ANTERIOR al cursor, como cualquier campo

@@ -6,6 +6,7 @@
 #   sudo ./optimize-pi.sh --apply          optimiza el sistema
 #   sudo ./optimize-pi.sh --apply --kiosk  ademas, arranca solo el juego
 #   sudo ./optimize-pi.sh --apply --kiosk --mode=1024x768   resolucion del kiosco
+#   sudo ./optimize-pi.sh --apply --kiosk --rate=60         Hz del kiosco
 #   sudo ./optimize-pi.sh --apply --no-bluetooth   apaga tambien el Bluetooth
 #                                                  (NO lo uses si tu mando es BT)
 #   sudo ./optimize-pi.sh --revert         deshace todo
@@ -23,8 +24,23 @@
 # Todo lo que modifica se copia antes a /var/backups/baifobird-<fecha>/.
 set -uo pipefail
 
+# La ayuda es la cabecera de este mismo fichero. Antes se sacaba con un rango de
+# lineas fijo ('2,25p'), que se desajustaba en cuanto se anadia un parrafo; esto
+# imprime los comentarios hasta la primera linea que no lo sea.
+ayuda() {
+    awk 'NR>1 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "$0"
+}
+
 APLICAR=0; REVERTIR=0; KIOSCO=0; SIMULAR=0; SIN_BT=0
-MODO_KIOSCO=1280x720      # resolucion de X en modo kiosco (--mode para cambiarla)
+# Resolucion de X en modo kiosco (--mode para cambiarla). 800x600 son 480.000
+# px, cerca de los 800x538 que el juego usa por defecto en Pi. Antes eran
+# 1280x720: 921.600 px, mas del doble, y ademas el monitor de prueba anunciaba
+# ese modo a 120 Hz, asi que el vsync pedia 120 fotogramas de 921.600 px. Entre
+# las dos cosas, 4,3 veces el relleno que se pretendia.
+MODO_KIOSCO=800x600
+# Los Hz importan tanto como los pixeles: sin --rate, xrandr coge el primer modo
+# de la lista, que puede ser 120 Hz.
+HZ_KIOSCO=60
 for a in "$@"; do
     case "$a" in
         --apply)   APLICAR=1 ;;
@@ -32,13 +48,14 @@ for a in "$@"; do
         --kiosk)   KIOSCO=1 ;;
         --no-bluetooth) SIN_BT=1 ;;
         --mode=*)  MODO_KIOSCO="${a#*=}" ;;
+        --rate=*)  HZ_KIOSCO="${a#*=}" ;;
         --dry-run) SIMULAR=1; APLICAR=1 ;;
-        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+        -h|--help) ayuda; exit 0 ;;
         *) echo "Opcion desconocida: $a"; exit 1 ;;
     esac
 done
 if [ $APLICAR -eq 0 ] && [ $REVERTIR -eq 0 ]; then
-    sed -n '2,25p' "$0"; exit 1
+    ayuda; exit 1
 fi
 
 # ---------------------------------------------------------------- utilidades
@@ -59,6 +76,24 @@ respaldar() {
     [ $SIMULAR -eq 1 ] && { info "[simulado] copiaria $1"; return 0; }
     mkdir -p "$RESPALDO$(dirname "$1")"
     cp -a "$1" "$RESPALDO$1"
+}
+
+# El bloque de autoarranque va entre marcas para poder REEMPLAZARLO.
+#
+# Antes se anadia con un 'if ! grep -q "BaifoBird kiosco"', que solo evitaba
+# duplicados: si ya habia un bloque -el de X- y luego se instalaba SFML-Pi, el
+# script daba por hecho que no habia nada que hacer y dejaba el bloque viejo,
+# que seguia lanzando startx. Cambiar de kiosco con X a kiosco sin X era
+# imposible sin editar .bash_profile a mano.
+MARCA_INI="# >>> BaifoBird kiosco >>>"
+MARCA_FIN="# <<< BaifoBird kiosco <<<"
+
+quitar_bloque_kiosco() {
+    [ -f "$1" ] || return 0
+    # Se borran tanto el bloque con marcas como los de versiones anteriores,
+    # que empezaban por un comentario "# BaifoBird kiosco" y acababan en 'fi'.
+    sed -i -e "/^${MARCA_INI}\$/,/^${MARCA_FIN}\$/d" \
+           -e '/^# BaifoBird kiosco/,/^fi$/d' "$1"
 }
 
 # ------------------------------------------------------------ comprobaciones
@@ -114,6 +149,17 @@ if [ $REVERTIR -eq 1 ]; then
     done
     systemctl disable baifobird-kiosk.service 2>/dev/null
     rm -f /etc/systemd/system/baifobird-kiosk.service
+    # El autoarranque se quita del .bash_profile explicitamente. Restaurar la
+    # copia de seguridad no basta: si el fichero no existia antes, 'respaldar'
+    # no guardo nada y el bloque se quedaria ahi para siempre.
+    quitar_bloque_kiosco "$CASA/.bash_profile"
+    info "autoarranque retirado de $CASA/.bash_profile"
+    # El gobernador vuelve a manos del sistema (ondemand en Raspberry Pi OS).
+    systemctl disable baifobird-governor.service 2>/dev/null
+    rm -f /etc/systemd/system/baifobird-governor.service
+    for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+        [ -w "$g" ] && echo ondemand > "$g" 2>/dev/null
+    done
     rm -f /etc/systemd/system/getty@tty1.service.d/baifobird-autologin.conf
     rmdir /etc/systemd/system/getty@tty1.service.d 2>/dev/null
     systemctl set-default graphical.target 2>/dev/null
@@ -155,14 +201,38 @@ fi
 paso "2. Gobernador de CPU en 'performance'"
 # Por defecto es 'ondemand': la CPU baja a 600 MHz y sube tarde, lo que provoca
 # tirones al empezar a moverse. 'performance' la deja fija a su maximo.
-if [ -f /etc/default/cpufrequtils ]; then respaldar /etc/default/cpufrequtils; fi
+#
+# Antes esto escribia GOVERNOR="performance" en /etc/default/cpufrequtils. Ese
+# fichero SOLO lo lee el paquete cpufrequtils, que en Raspberry Pi OS no viene
+# instalado: en la Pi de pruebas el ajuste llevaba semanas sin aplicarse y el
+# gobernador seguia en 'ondemand' tras cada reinicio. La escritura directa al
+# sysfs si funcionaba, pero se perdia al apagar.
+#
+# Una unidad de systemd no depende de ningun paquete y se ejecuta en cada
+# arranque, que es justo lo que hacia falta.
+UNIDAD_GOB=/etc/systemd/system/baifobird-governor.service
 if [ $SIMULAR -eq 0 ]; then
-    echo 'GOVERNOR="performance"' > /etc/default/cpufrequtils
-    for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-        [ -w "$g" ] && echo performance > "$g" 2>/dev/null
-    done
+    cat > "$UNIDAD_GOB" <<'GEOF'
+[Unit]
+Description=BaifoBird: gobernador de CPU en performance
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do [ -w "$g" ] && echo performance > "$g"; done; exit 0'
+
+[Install]
+WantedBy=multi-user.target
+GEOF
+    systemctl daemon-reload
+    systemctl enable baifobird-governor.service >/dev/null 2>&1
+    systemctl start baifobird-governor.service >/dev/null 2>&1
+else
+    info "[simulado] crearia $UNIDAD_GOB"
 fi
-info "gobernador fijado (se aplica ya y en cada arranque)"
+ACTUAL_GOB=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo "?")
+info "gobernador ahora: $ACTUAL_GOB  (unidad systemd, se reaplica en cada arranque)"
 
 # ------------------------------------------------------------ 3. servicios
 paso "3. Servicios que no hacen falta para jugar"
@@ -244,16 +314,16 @@ AEOF
         PERFIL="$CASA/.bash_profile"
         respaldar "$PERFIL"
         touch "$PERFIL"
-        if ! grep -q "BaifoBird kiosco" "$PERFIL"; then
-            cat >> "$PERFIL" <<PEOF
-
-# BaifoBird kiosco (SFML-Pi, sin servidor grafico)
+        quitar_bloque_kiosco "$PERFIL"
+        cat >> "$PERFIL" <<PEOF
+$MARCA_INI
+# SFML-Pi: sin servidor grafico, se pinta por DRM/KMS.
 if [ "\$XDG_VTNR" = 1 ]; then
     cd "$JUEGO_DIR" || exit 1
     SFML_DRM_MODE=$MODO_KIOSCO exec ./FlappyBird
 fi
+$MARCA_FIN
 PEOF
-        fi
         chown "$USUARIO":"$USUARIO" "$PERFIL"
         info "el juego arranca directo en tty1, sin X, a $MODO_KIOSCO"
     fi
@@ -267,9 +337,15 @@ PEOF
 # A pantalla completa se usa la resolucion del ESCRITORIO. En un monitor 1080p
 # eso son 2 Mpx y la Pi 3 se arrastra, asi que primero se baja el modo de X.
 # Si xrandr no puede, se sigue igual: el juego se adapta a lo que haya.
+#
+# Los Hz cuentan tanto como los pixeles. Sin --rate, xrandr coge el PRIMER modo
+# de la lista con ese tamano, y en el monitor de pruebas 1280x720 aparecia como
+# 120 Hz: el vsync pedia 120 fotogramas por segundo a una Pi 3. De ahi que se
+# intente primero con la tasa pedida y solo se caiga a "sin --rate" si falla.
 if command -v xrandr >/dev/null 2>&1; then
     SALIDA=\$(xrandr | awk '/ connected/{print \$1; exit}')
-    for MODO in $MODO_KIOSCO 1280x720 1024x768 800x600; do
+    for MODO in $MODO_KIOSCO 800x600 1024x768 1280x720; do
+        xrandr --output "\$SALIDA" --mode "\$MODO" --rate $HZ_KIOSCO 2>/dev/null && break
         xrandr --output "\$SALIDA" --mode "\$MODO" 2>/dev/null && break
     done
 fi
@@ -285,18 +361,21 @@ XEOF
         PERFIL="$CASA/.bash_profile"
         respaldar "$PERFIL"
         touch "$PERFIL"
-        if ! grep -q "BaifoBird kiosco" "$PERFIL"; then
-            cat >> "$PERFIL" <<'PEOF'
-
-# BaifoBird kiosco: arranca el juego al entrar en la primera consola
-if [ -z "$DISPLAY" ] && [ "$XDG_VTNR" = 1 ]; then
+        quitar_bloque_kiosco "$PERFIL"
+        cat >> "$PERFIL" <<PEOF
+$MARCA_INI
+# Arranca X con el juego como unico cliente, al entrar en la primera consola.
+if [ -z "\$DISPLAY" ] && [ "\$XDG_VTNR" = 1 ]; then
     exec startx
 fi
+$MARCA_FIN
 PEOF
-        fi
         chown "$USUARIO":"$USUARIO" "$PERFIL"
     fi
-    [ $SIN_X -eq 0 ] && info "sesion X que ejecuta solo ./FlappyBird --fullscreen"
+    [ $SIN_X -eq 0 ] && info "sesion X a $MODO_KIOSCO @ ${HZ_KIOSCO}Hz con solo ./FlappyBird --fullscreen"
+    # El juego, a partir de esta version, tambien elige por su cuenta el modo de
+    # pantalla completa mas pequeno que le sirva, y se topa a 60 fps en Pi. Lo
+    # de aqui es la primera linea de defensa; el codigo es la segunda.
     info "para salir del juego: ESC en el menu principal"
     info "para recuperar una consola: Ctrl+Alt+F2"
 fi
